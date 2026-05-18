@@ -8,6 +8,10 @@ from app.services.rag_service import (
     ask_rag_question,
     retrieve_relevant_chunks,
 )
+from app.services.langchain_rag_service import (
+    retrieve_with_langchain,
+    ask_with_langchain_rag,
+)
 from storage.mongodb_client import MongoDBClient
 
 settings = get_settings()
@@ -36,6 +40,16 @@ class RagAskRequest(BaseModel):
 class RagRetrieveRequest(BaseModel):
     question: str
     top_k: int = 5
+
+class LangChainRagAskRequest(BaseModel):
+    question: str
+    top_k: int = 5
+
+
+class LangChainRagRetrieveRequest(BaseModel):
+    question: str
+    top_k: int = 5
+
 
 @app.get("/")
 def root():
@@ -219,4 +233,38 @@ def rag_retrieve(request: RagRetrieveRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving chunks: {str(e)}",
+        )
+    
+
+@app.post("/langchain/rag/retrieve")
+def langchain_rag_retrieve(request: LangChainRagRetrieveRequest):
+    try:
+        result = retrieve_with_langchain(
+            question=request.question,
+            top_k=request.top_k,
+        )
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving with LangChain RAG: {str(e)}",
+        )
+
+
+@app.post("/langchain/rag/ask")
+def langchain_rag_ask(request: LangChainRagAskRequest):
+    try:
+        result = ask_with_langchain_rag(
+            question=request.question,
+            top_k=request.top_k,
+        )
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error answering with LangChain RAG: {str(e)}",
         )

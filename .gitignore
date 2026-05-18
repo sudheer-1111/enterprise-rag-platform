@@ -1,0 +1,41 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+
+# Environment variables
+.env
+
+# ChromaDB local vector database
+chroma_db/
+
+# Local data files
+data/raw/enterprise_docs/
+data/processed/
+
+# MongoDB local dumps/backups
+mongo_backups/
+
+# Logs
+logs/
+*.log
+
+# Jupyter / notebook checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# VS Code local settings
+.vscode/
+
+# Test/cache folders
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

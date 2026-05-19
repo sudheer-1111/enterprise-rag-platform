@@ -25,6 +25,10 @@ mongo_backups/
 logs/
 *.log
 
+
+#docs generation
+pipelines/generate_full_enterprise_docs
+
 # Jupyter / notebook checkpoints
 .ipynb_checkpoints/
 

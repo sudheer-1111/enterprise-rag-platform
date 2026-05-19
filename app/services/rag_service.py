@@ -7,6 +7,7 @@ from pipelines.chunking import chunk_text
 from storage.vector_store import VectorStore
 from datetime import datetime, timezone
 from storage.mongodb_client import MongoDBClient
+from app.services.reranker_service import rerank_chunks
 
 settings = get_settings()
 
@@ -212,4 +213,180 @@ def retrieve_relevant_chunks(question: str, top_k: int = 5) -> Dict[str, Any]:
         "top_k": top_k,
         "retrieved_count": len(retrieved_results),
         "results": retrieved_results,
+    }
+
+def retrieve_with_reranking(
+    question: str,
+    initial_k: int = 10,
+    top_n: int = 3,
+) -> Dict[str, Any]:
+    """
+    Retrieve more chunks from ChromaDB, then rerank them using a local LLM.
+    """
+
+    vector_store = VectorStore()
+
+    results = vector_store.search(
+        query=question,
+        top_k=initial_k,
+    )
+
+    documents: List[str] = results.get("documents", [[]])[0]
+    metadatas: List[dict] = results.get("metadatas", [[]])[0]
+    distances: List[float] = results.get("distances", [[]])[0]
+
+    if not documents:
+        return {
+            "question": question,
+            "initial_k": initial_k,
+            "top_n": top_n,
+            "retrieved_count": 0,
+            "reranked_results": [],
+        }
+
+    reranked = rerank_chunks(
+        question=question,
+        documents=documents,
+        metadatas=metadatas,
+        distances=distances,
+        top_n=top_n,
+    )
+
+    formatted_results = []
+
+    for rank, item in enumerate(reranked, start=1):
+        metadata = item["metadata"]
+
+        formatted_results.append(
+            {
+                "reranked_rank": rank,
+                "original_rank": item["original_rank"],
+                "rerank_score": item["rerank_score"],
+                "vector_distance": item["vector_distance"],
+                "source_file": metadata.get("source_file"),
+                "document_name": metadata.get("document_name"),
+                "chunk_index": metadata.get("chunk_index"),
+                "text_preview": item["text"][:300],
+                "full_text": item["text"],
+            }
+        )
+
+    return {
+        "question": question,
+        "initial_k": initial_k,
+        "top_n": top_n,
+        "retrieved_count": len(documents),
+        "reranked_count": len(formatted_results),
+        "reranked_results": formatted_results,
+    }
+
+
+def ask_rag_question_with_reranking(
+    question: str,
+    initial_k: int = 10,
+    top_n: int = 3,
+) -> Dict[str, Any]:
+    """
+    Full RAG with reranking:
+    1. Retrieve initial candidates from ChromaDB
+    2. Rerank candidates using local Ollama
+    3. Send best chunks to LLM
+    4. Log query in MongoDB
+    """
+
+    mongo_client = MongoDBClient()
+
+    rerank_result = retrieve_with_reranking(
+        question=question,
+        initial_k=initial_k,
+        top_n=top_n,
+    )
+
+    reranked_results = rerank_result.get("reranked_results", [])
+
+    if not reranked_results:
+        answer = "I could not find relevant context in the document database."
+
+        query_id = mongo_client.insert_query_log(
+            {
+                "question": question,
+                "answer": answer,
+                "sources": [],
+                "initial_k": initial_k,
+                "top_n": top_n,
+                "model": settings.chat_model,
+                "reranking": True,
+                "status": "no_relevant_context",
+            }
+        )
+
+        return {
+            "query_id": query_id,
+            "question": question,
+            "answer": answer,
+            "sources": [],
+            "reranking": True,
+            "status": "no_relevant_context",
+        }
+
+    context = "\n\n---\n\n".join(
+        [item["full_text"] for item in reranked_results]
+    )
+
+    sources = []
+
+    for item in reranked_results:
+        sources.append(
+            {
+                "source_file": item.get("source_file"),
+                "document_name": item.get("document_name"),
+                "chunk_index": item.get("chunk_index"),
+                "original_rank": item.get("original_rank"),
+                "reranked_rank": item.get("reranked_rank"),
+                "rerank_score": item.get("rerank_score"),
+                "vector_distance": item.get("vector_distance"),
+            }
+        )
+
+    prompt = f"""
+You are an enterprise RAG assistant.
+
+Answer the user's question using ONLY the reranked context below.
+Do not use outside knowledge.
+If the answer is not available in the context, say:
+"I do not have enough information in the provided documents."
+
+Reranked Context:
+{context}
+
+User Question:
+{question}
+
+Final Answer:
+"""
+
+    answer = generate_answer(prompt)
+
+    query_id = mongo_client.insert_query_log(
+        {
+            "question": question,
+            "answer": answer,
+            "sources": sources,
+            "initial_k": initial_k,
+            "top_n": top_n,
+            "model": settings.chat_model,
+            "reranking": True,
+            "status": "success",
+        }
+    )
+
+    return {
+        "query_id": query_id,
+        "question": question,
+        "answer": answer,
+        "sources": sources,
+        "retrieved_chunks": [item["full_text"] for item in reranked_results],
+        "model": settings.chat_model,
+        "reranking": True,
+        "status": "success",
     }

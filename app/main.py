@@ -7,12 +7,15 @@ from app.services.rag_service import (
     ingest_text_files,
     ask_rag_question,
     retrieve_relevant_chunks,
+    retrieve_with_reranking,
+    ask_rag_question_with_reranking,
 )
 from app.services.langchain_rag_service import (
     retrieve_with_langchain,
     ask_with_langchain_rag,
 )
 from storage.mongodb_client import MongoDBClient
+
 
 settings = get_settings()
 
@@ -49,6 +52,18 @@ class LangChainRagAskRequest(BaseModel):
 class LangChainRagRetrieveRequest(BaseModel):
     question: str
     top_k: int = 5
+
+
+class RerankRetrieveRequest(BaseModel):
+    question: str
+    initial_k: int = 10
+    top_n: int = 3
+
+
+class RerankAskRequest(BaseModel):
+    question: str
+    initial_k: int = 10
+    top_n: int = 3
 
 
 @app.get("/")
@@ -267,4 +282,39 @@ def langchain_rag_ask(request: LangChainRagAskRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Error answering with LangChain RAG: {str(e)}",
+        )
+    
+@app.post("/rag/retrieve-rerank")
+def rag_retrieve_rerank(request: RerankRetrieveRequest):
+    try:
+        result = retrieve_with_reranking(
+            question=request.question,
+            initial_k=request.initial_k,
+            top_n=request.top_n,
+        )
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving with reranking: {str(e)}",
+        )
+
+
+@app.post("/rag/ask-rerank")
+def rag_ask_rerank(request: RerankAskRequest):
+    try:
+        result = ask_rag_question_with_reranking(
+            question=request.question,
+            initial_k=request.initial_k,
+            top_n=request.top_n,
+        )
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error answering with reranking: {str(e)}",
         )
